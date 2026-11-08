@@ -136,22 +136,82 @@ void parseSlt(const std::shared_ptr<XmlNode>& root, Slt& slt) {
 
 } // namespace
 
+namespace {
+
+// One table's gzip body (tables 1 to 5) into t; false when it is not one of those or does not inflate / parse.
+bool parseLlsBody(LlsTable& t, const uint8_t* body, size_t n) {
+    if (t.tableId < 1 || t.tableId > 5) return false;   // SLT, RRT, SystemTime, AEAT, OnscreenMessageNotification: gzip compressed XML
+    std::vector<uint8_t> x;
+    if (!gunzip(body, n, x, 8u << 20)) return false;
+    t.xml.assign(x.begin(), x.end());
+    if (t.tableId == 1) {
+        auto root = parseXml(t.xml);
+        if (!root || root->local() != "SLT") return false;
+        parseSlt(root, t.slt);
+    }
+    t.ok = true;
+    return true;
+}
+
+} // namespace
+
 LlsTable parseLls(const uint8_t* p, size_t n) {
     LlsTable t;
     if (n < 4) return t;
     t.tableId = p[0]; t.groupId = p[1]; t.groupCount = p[2] + 1; t.version = p[3];
-    if (t.tableId >= 1 && t.tableId <= 5) {   // SLT, RRT, SystemTime, AEAT, OnscreenMessageNotification: gzip compressed XML
-        std::vector<uint8_t> x;
-        if (!gunzip(p + 4, n - 4, x, 8u << 20)) return t;
-        t.xml.assign(x.begin(), x.end());
-        if (t.tableId == 1) {
-            auto root = parseXml(t.xml);
-            if (!root || root->local() != "SLT") return t;
-            parseSlt(root, t.slt);
-        }
-        t.ok = true;
+    if (t.tableId != 0xFE) {
+        parseLlsBody(t, p + 4, n - 4);
+        return t;
     }
-    return t;
+    // SignedMultiTable (A/331, LLS_table_id 0xFE): count, then count x { table id, version, 16-bit length, the table's own gzip },
+    // then a 16-bit signature length and a CMS signature. Some stations send every service list this way, and a receiver that
+    // only knows tables 1 to 5 sees no service at all (seen on air, 2026-11). The SLT inside is what the caller wants, so the
+    // result IS that table, with the outer header remembered in container*. The signature is read past, not verified.
+    LlsTable outer = t;
+    size_t o = 4;
+    if (o >= n) return t;
+    const int count = p[o++];
+    LlsTable first;
+    bool haveFirst = false;
+    for (int i = 0; i < count; i++) {
+        if (o + 4 > n) return t;
+        LlsTable in;
+        in.tableId = p[o]; in.version = p[o + 1];
+        const size_t len = ((size_t)p[o + 2] << 8) | p[o + 3];
+        o += 4;
+        if (o + len > n) return t;
+        in.groupId = outer.groupId; in.groupCount = outer.groupCount;
+        parseLlsBody(in, p + o, len);
+        o += len;
+        if (!in.ok) continue;
+        if (!haveFirst || (in.tableId == 1 && first.tableId != 1)) { first = in; haveFirst = true; }
+    }
+    if (!haveFirst) return t;
+    size_t sig = 0;
+    if (o + 2 <= n) {
+        sig = ((size_t)p[o] << 8) | p[o + 1];
+        o += 2;
+        if (o + sig > n) sig = n - o;
+    }
+    first.container = 0xFE;
+    first.containerTables = count;
+    first.signatureBytes = sig;
+    return first;
+}
+
+std::vector<uint8_t> makeLlsMulti(int group, int version, const std::vector<std::vector<uint8_t>>& tables,
+                                  const std::vector<uint8_t>& signature) {
+    std::vector<uint8_t> v = {0xFE, (uint8_t)group, 0, (uint8_t)version, (uint8_t)tables.size()};
+    for (const auto& t : tables) {
+        if (t.size() < 4) continue;
+        const size_t len = t.size() - 4;
+        v.push_back(t[0]); v.push_back(t[3]);
+        v.push_back((uint8_t)(len >> 8)); v.push_back((uint8_t)(len & 255));
+        v.insert(v.end(), t.begin() + 4, t.end());
+    }
+    v.push_back((uint8_t)(signature.size() >> 8)); v.push_back((uint8_t)(signature.size() & 255));
+    v.insert(v.end(), signature.begin(), signature.end());
+    return v;
 }
 
 std::vector<uint8_t> makeLls(int id, int group, int version, const std::string& xml) {

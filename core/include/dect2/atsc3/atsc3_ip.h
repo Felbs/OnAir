@@ -58,11 +58,19 @@ struct LlsTable {
     std::string xml;                   // the decompressed table (tables 1 to 5)
     Slt slt;                           // when tableId == 1
     bool ok = false;
+    // A SignedMultiTable (LLS_table_id 0xFE) carries several tables and a signature in one datagram; the result is then the SLT it
+    // holds (or its first table), with the outer header kept here. The signature is not verified.
+    int container = 0;                 // 0xFE when the table came out of a SignedMultiTable
+    int containerTables = 0;           // how many tables the container held
+    size_t signatureBytes = 0;         // length of the signature that followed them
 };
 
-// Parses the payload of a UDP datagram to 224.0.23.60:4937.
+// Parses the payload of a UDP datagram to 224.0.23.60:4937 -- a single table, or a SignedMultiTable holding several.
 LlsTable parseLls(const uint8_t* payload, size_t size);
 std::vector<uint8_t> makeLls(int tableId, int group, int version, const std::string& xml);
+// A SignedMultiTable from single tables made by makeLls() (their headers are dropped) and an opaque signature.
+std::vector<uint8_t> makeLlsMulti(int group, int version, const std::vector<std::vector<uint8_t>>& tables,
+                                  const std::vector<uint8_t>& signature);
 
 } // namespace atsc3
 } // namespace dect2

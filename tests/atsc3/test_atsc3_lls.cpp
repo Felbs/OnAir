@@ -62,6 +62,23 @@ int main() {
     CHECK(got == 1 && d.payload == lls, "fragment reassembly out of order");
     auto tcp = whole[0]; tcp[9] = 6;
     CHECK(!rx.push(tcp.data(), tcp.size(), d) && !rx.push(tcp.data(), 10, d) && rx.dropped() >= 2, "non UDP and truncated packets");
+    // a SignedMultiTable (table 0xFE) holding a SystemTime, the SLT and an unknown table, then a signature -- the SLT comes out of
+    // it, with the container noted; the same SLT alone still parses the same; a container without an SLT yields its first table;
+    // a truncated container fails cleanly
+    auto sysTime = makeLls(3, 0, 1, "<?xml version=\"1.0\"?><SystemTime currentUtcOffset=\"37\"/>");
+    auto unknown = makeLls(9, 0, 1, "<?xml version=\"1.0\"?><Mystery/>");
+    std::vector<uint8_t> sig(656, 0x30);
+    auto multi = makeLlsMulti(0, 2, {sysTime, mine, unknown}, sig);
+    auto tm = parseLls(multi.data(), multi.size());
+    CHECK(tm.ok && tm.tableId == 1 && tm.container == 0xFE && tm.containerTables == 3 && tm.signatureBytes == 656 && tm.version == 200,
+          "SignedMultiTable: the SLT inside");
+    checkSlt(tm.slt, "SignedMultiTable");
+    auto only = makeLlsMulti(0, 2, {sysTime}, {});
+    auto to = parseLls(only.data(), only.size());
+    CHECK(to.ok && to.tableId == 3 && to.container == 0xFE && to.containerTables == 1 && to.signatureBytes == 0 &&
+          to.xml.find("SystemTime") != std::string::npos, "SignedMultiTable without an SLT: its first table");
+    CHECK(!parseLls(multi.data(), multi.size() / 2).ok, "truncated SignedMultiTable");
+    CHECK(!parseLls(multi.data(), 5).ok, "SignedMultiTable with no tables");
     printf(fails ? "atsc3 lls: FAILED\n" : "atsc3 lls: ok\n");
     return fails ? 1 : 0;
 }
