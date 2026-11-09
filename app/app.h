@@ -155,7 +155,7 @@ using SavedChannel = plat::Channel;
 // parts of the window the tour points at
 enum WizTarget { TgNone = 0, TgSwitch, TgToolbar, TgMain, TgRight, TgConst, TgCount };
 
-constexpr int kNumFamilies = 241;   // App::family runs from 0 to kNumFamilies - 1
+constexpr int kNumFamilies = 242;   // App::family runs from 0 to kNumFamilies - 1
 constexpr int kShortwaveFamily = 212;   // Shortwave (engine standard 213): the general receiver with one-click HF decoders
 // The two modes that listen with the General receiver's screen (app/general): the General receiver and Shortwave
 inline bool isGeneralFamily(int f) { return f == 55 || f == kShortwaveFamily; }
@@ -1016,6 +1016,7 @@ void txSelectMode(App& a, int family, const char* subId);
 bool txModeHighlighted(const ModeDef& m);
 void txTick(App& a);               // every frame: gives the radio back when a transmission ended; the on-screen TX indicator
 void iptvShutdown();               // iptv_ui.cpp: stops the stream (the program's end)
+void extengineShutdown();          // extengine_ui.cpp: asks the external engine to close its receiver and exit (the program's end)
 void txShutdown();                 // stops a running transmission (the radio goes quiet before it returns); the program's end
 bool txActive();
 void savePrefs(const App& a);

@@ -316,7 +316,7 @@ static void externalPlayerBox(App& a) {
 void playerTab(App& a) {
     Player& pl = a.engine.player();
     PlayerStats ps = pl.stats();
-    const bool iptvScreen = a.family == 209;   // Internet TV draws its own header and guide and reuses the picture and the controls
+    const bool iptvScreen = a.family == 209 || a.family == 241;   // Internet TV and the external engine draw their own header and reuse the picture and the controls
     if (!iptvScreen) {   // channel selector (muxes found by the scanner) and the signal-quality bar
         const SavedChannel* cur = nullptr;
         for (auto& c : a.channels) if (std::fabs(c.freqMhz - a.freqMhz) < 0.01) cur = &c;

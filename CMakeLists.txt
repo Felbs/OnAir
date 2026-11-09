@@ -179,6 +179,7 @@ target_sources(dect2core PRIVATE core/src/backup/backup.cpp)   # Tools > Backup 
 # The modes added after FM (DVB-S/S2, DTMB, analog TV, DMR, DRM, ADS-B): every core/src/<mode>/*.cpp belongs to its mode, so a mode can add files without editing this list
   set(DECT2_MODES autodet fsq ifkp cquam selfcal dvbs dtmb atv dmr drm adsb gnss dab sonde ais marine acars inmc aero iridium mesh hdr cdr pager packet hfdig airband vdl2 ism vor ils m17 cell cw dstar hfdl nxdn gsmr psk js8 specx wb specan dvbc dpmr orbcomm uplink tetra tetrapol ale mac astro p25 ble iono qo100 wifi general time rid meteor nr cubesat ccsds goes globalstar vdes hrpt zigbee flarm hfbeacon dji nbiot halow codar datawell same multitone loraraw ant dect elektro ndb lbj railway horus eczas vdl4 uat wisun fpv wmbus tones sarsat mt63 zwave mscatter dgps dme sitor kris kavb kapp kaft eloran mpt1327 trunkpool fusion ardop goesdcs modeac bletrk ltr edacs p25p2 kait satbeacon kaws milhf nfc kaal ham prop antd lorawan lorasat isdbs marinevhf argos sigfox sbas asterix voice)
   list(APPEND DECT2_MODES pactor)   # PACTOR-I monitor (family 203): core/src/pactor, app/pactor, tests/pactor
+  list(APPEND DECT2_MODES extengine)   # External engine (family 241): another program's TV receiver behind the player (tvTuna, docs/EXTERNAL-ENGINE.md): core/src/extengine, app/extengine, tests/extengine
   list(APPEND DECT2_MODES roshf ssdv ebicab nrf24 atis selcal)   # ROS (HF) detector (family 205), SSDV pictures (206), EBICab / Eurobalise up-link (207): core/src/<mode>, app/<mode>, tests/<mode>
   list(APPEND DECT2_MODES fy3)   # FY-3 AHRPT (family 235) and FY-3 MPT (236): core/src/fy3, app/fy3, tests/fy3 (docs/fy3.md)
   list(APPEND DECT2_MODES esubghz)   # Flipper Zero Sub-GHz chat, receive and send (family 204): core/src/esubghz, app/esubghz, tests/esubghz
@@ -1512,6 +1513,10 @@ if(DECT2_BUILD_TESTS)
     target_link_libraries(test_asterix_mode PRIVATE dect2core)
     target_compile_definitions(test_asterix_mode PRIVATE DECT2_SOURCE_DIR="${ONAIR_ROOT}")
     add_test(NAME asterix_mode COMMAND test_asterix_mode)
+    add_executable(test_extengine_mode tests/app/test_extengine_mode.cpp)   # the External engine mode: registered tuning, mode row, family count, feed branch, panel strings
+    target_link_libraries(test_extengine_mode PRIVATE dect2core)
+    target_compile_definitions(test_extengine_mode PRIVATE DECT2_SOURCE_DIR="${ONAIR_ROOT}")
+    add_test(NAME extengine_mode COMMAND test_extengine_mode)
     add_executable(test_argos_sigfox_mode tests/app/test_argos_sigfox_mode.cpp)   # the Argos and Sigfox modes: registered tunings, mode rows, family count, engine wiring and panel strings
     target_link_libraries(test_argos_sigfox_mode PRIVATE dect2core)
     target_compile_definitions(test_argos_sigfox_mode PRIVATE DECT2_SOURCE_DIR="${ONAIR_ROOT}")
