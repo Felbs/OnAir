@@ -17,10 +17,14 @@ that come out clean), and behind a site radio warden that shares one SDR between
 2. In OnAir pick **External engine**, check the engine command (default `python -m tvtuna engine
    --tcp 8555`), the TS host and port, give the RF channel number (or click one from the engine's
    own table once the engine has started), press **Start and tune**.
-3. The picture appears in the usual player with volume, subtitles, audio track, full screen and
-   recording. Above it: the engine's state, the servo state and the held gain setting, the MER
-   against the 15.2 dB data cliff, pictures per second (ATSC 1.0) or frames and interval FEC
-   (ATSC 3.0), packet and continuity-error counts, and who holds the radio.
+3. The picture appears in the mode's tab with the usual player controls (volume, subtitles, audio
+   track, full screen, pop out, recording). The tab keeps one row of controls above it; the engine's
+   command, host and port fold away under **Engine** while a channel plays. The main programme of the
+   multiplex is played: the lowest programme number, not whichever table arrived first.
+4. The row under the tabs, where the TV modes have their constellations, shows what the engine
+   measured: the servo state and the held gain setting, the MER against the 15.2 dB data cliff,
+   pictures per second (ATSC 1.0) or frames and interval FEC (ATSC 3.0), packet and
+   continuity-error counts, and who holds the radio.
 
 Leaving the screen stops the engine; so does closing OnAir. The engine is always asked to stop
 (it must close its radio itself) and is only killed if it has not exited after 90 s.

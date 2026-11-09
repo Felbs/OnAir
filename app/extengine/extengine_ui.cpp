@@ -30,6 +30,7 @@ struct State {
     TsSnapshot snap;
     double snapT = 0;
     bool selected = false;
+    double pmtT = 0;              // when the first PMT of this stream was seen (0: none yet)
     bool havePlaying = false;
     std::atomic<double> lastTick{0};
     std::string msg;
@@ -74,12 +75,15 @@ void sink(const uint8_t* p, size_t n, App* a) {
     const double t = glfwGetTime();
     bool haveSvc = false;
     for (auto& sv : S.snap.services) if (sv.havePmt) haveSvc = true;
-    if (!haveSvc || t - S.snapT > 1.0) { S.snap = S.demux.snapshot(); S.snapT = t; }
+    if (!haveSvc || !S.selected || t - S.snapT > 1.0) { S.snap = S.demux.snapshot(); S.snapT = t; }
     Player& pl = a->engine.player();
     if (!S.selected) {
-        int pick = -1;
-        for (auto& sv : S.snap.services) if (sv.havePmt) { if (pick < 0) pick = sv.id; }
-        if (pick >= 0) { pl.select(pick); pl.setVolume(a->volume); S.selected = true; }
+        // the main programme, not whichever PMT arrived first (found live: one run opened the HD programme, the next a subchannel):
+        // the lowest programme number, once every programme of the PAT has its PMT, or a second after the first PMT
+        int pick = -1; bool all = !S.snap.services.empty();
+        for (auto& sv : S.snap.services) { if (!sv.havePmt) { all = false; continue; } if (pick < 0 || sv.id < pick) pick = sv.id; }
+        if (pick >= 0 && S.pmtT == 0) S.pmtT = t;
+        if (pick >= 0 && (all || t - S.pmtT > 1.0)) { pl.select(pick); pl.setVolume(a->volume); S.selected = true; }
     }
     if (pl.selected() >= 0) pl.push(p, n, S.snap);
 }
@@ -90,13 +94,13 @@ void stopPlaying(App& a) {
     a.engine.player().select(-1);
     a.engine.setPlayerExternal(false);
     a.engine.teletext().reset();
-    S.selected = false;
+    S.selected = false; S.pmtT = 0;
     S.havePlaying = false;
 }
 
 void play(App& a) {
     if (S.rf <= 0) { S.msg = "Give the RF channel number the engine should tune."; return; }
-    { std::lock_guard<std::mutex> lk(S.pmu); S.demux.reset(); S.snap = TsSnapshot(); S.snapT = 0; S.selected = false; }
+    { std::lock_guard<std::mutex> lk(S.pmu); S.demux.reset(); S.snap = TsSnapshot(); S.snapT = 0; S.selected = false; S.pmtT = 0; }
     a.engine.player().select(-1);
     a.engine.setPlayerExternal(true);
     a.engine.teletext().reset();
@@ -114,9 +118,8 @@ void play(App& a) {
     S.eng.tune(S.rf);
 }
 
-void drawStatus(App& a) {
-    const extengine::Status st = S.eng.status();
-    const PlayerStats ps = a.engine.player().stats();
+// one line above the picture: which channel, and whether pictures are coming
+void drawState(App& a, const extengine::Status& st) {
     ImGui::AlignTextToFramePadding();
     const std::string title = st.rf > 0 ? "RF " + std::to_string(st.rf) + (st.standard == "atsc1" ? "  ATSC 1.0" : st.standard == "atsc3" ? "  ATSC 3.0" : "") : std::string("External engine");
     ImGui::TextColored(pal::heading(), "%s", title.c_str());
@@ -124,9 +127,19 @@ void drawStatus(App& a) {
     ImVec4 col = good ? ImVec4(0.45f, 0.85f, 0.5f, 1) : st.state == "error" ? ImVec4(0.95f, 0.45f, 0.4f, 1) : ImVec4(0.95f, 0.8f, 0.35f, 1);
     const char* label = st.state == "up" ? (good ? "decoding" : "tuned, waiting for pictures") : st.state == "tuning" ? "tuning (the engine searches the gain on decoder truth)"
                       : st.state == "starting" ? "starting the engine" : st.state == "error" ? "cannot play" : st.state == "idle" ? "engine idle" : "stopped";
+    ImGui::SameLine();
     ImGui::TextColored(col, "%s", label);
     if (!st.message.empty()) { ImGui::SameLine(); ImGui::PushTextWrapPos(0); ImGui::TextUnformatted(st.message.c_str()); ImGui::PopTextWrapPos(); }
-    // decoder truth: what the engine measured, not what a meter felt
+    if (st.state == "error") { ImGui::SameLine(); if (ImGui::Button("Try again##extretry")) play(a); }
+}
+
+// The row under the tabs, where the TV modes have their constellations: the decoder truth, what the engine measured and not what a
+// meter felt. It lives here so that the tab above keeps its height for the picture.
+void panels(App& a) {
+    if (!S.havePlaying) { ImGui::TextDisabled("%s", tr("The engine's measurements appear here once a channel is tuned.")); return; }
+    const extengine::Status st = S.eng.status();
+    const PlayerStats ps = a.engine.player().stats();
+    ImGui::TextColored(pal::heading(), "%s", tr("Engine measurements"));
     std::string line;
     if (!st.servoState.empty()) line += "servo " + st.servoState;
     if (!st.setting.empty()) line += (line.empty() ? "" : "  |  ") + st.setting;
@@ -134,32 +147,27 @@ void drawStatus(App& a) {
     if (st.standard == "atsc1") { char b[64]; snprintf(b, sizeof b, "  |  %s %.1f pictures/s", st.video ? "video" : "NO video", st.picturesPerS); line += b; }
     if (st.frames >= 0) { char b[64]; snprintf(b, sizeof b, "  |  frames %lld", st.frames); line += b; }
     if (st.fecPct >= 0) { char b[64]; snprintf(b, sizeof b, "  |  FEC %.0f %%%s", st.fecPct, st.fecPct < 20 ? " (fade: the air, not the code)" : ""); line += b; }
-    if (!line.empty()) ImGui::TextDisabled("%s", line.c_str());
+    if (!line.empty()) ImGui::TextUnformatted(line.c_str());
     std::string l2;
     if (st.packets >= 0) l2 += std::to_string(st.packets) + " packets";
     if (st.ccErrors >= 0) l2 += (l2.empty() ? "" : "  |  ") + std::to_string(st.ccErrors) + " continuity errors";
     if (st.tei >= 0) l2 += "  |  " + std::to_string(st.tei) + " TEI";
     if (ps.width > 0) l2 += (l2.empty() ? "" : "  |  ") + std::to_string(ps.width) + "x" + std::to_string(ps.height) + (ps.fps > 0 ? " " + std::to_string((int)(ps.fps + 0.5)) + " fps" : "");
     if (!ps.videoCodec.empty()) l2 += "  |  " + ps.videoCodec + (ps.audioCodec.empty() ? "" : " + " + ps.audioCodec);
-    if (!l2.empty()) ImGui::TextDisabled("%s", l2.c_str());
-    ImGui::TextDisabled("radio: %s", st.radioOwner.empty() ? "free" : (st.radioOwner + (st.radioPurpose.empty() ? "" : " (" + st.radioPurpose + ")")).c_str());
-    if (ImGui::Button("Stop##extstop")) stopPlaying(a);
-    if (st.state == "error") { ImGui::SameLine(); if (ImGui::Button("Try again##extretry")) play(a); }
+    if (!l2.empty()) ImGui::TextUnformatted(l2.c_str());
+    ImGui::Text("radio: %s", st.radioOwner.empty() ? "free" : (st.radioOwner + (st.radioPurpose.empty() ? "" : " (" + st.radioPurpose + ")")).c_str());
 }
 
 void tab(App& a) {
     loadState();
-    ImGui::TextDisabled("%s", tr("A receiver in another program: OnAir starts it, tunes it, and plays its transport stream. The first engine is tvTuna (ATSC 1.0 and ATSC 3.0)."));
-    ImGui::SetNextItemWidth(std::min(600.f * gUi, ImGui::GetContentRegionAvail().x - 8));
-    if (ImGui::InputText("Engine command##extcmd", S.cmdBuf, sizeof S.cmdBuf)) saveState();
-    ImGui::SetNextItemWidth(160 * gUi);
-    if (ImGui::InputText("TS host##exthost", S.hostBuf, sizeof S.hostBuf)) saveState();
-    ImGui::SameLine();
-    ImGui::SetNextItemWidth(90 * gUi);
-    if (ImGui::InputInt("port##extport", &S.port, 0, 0)) saveState();
-    ImGui::SetNextItemWidth(90 * gUi);
-    ImGui::InputInt("RF channel##extrf", &S.rf, 0, 0);
     const extengine::Status st = S.eng.status();
+    // one row of controls, then the picture: the tab's height belongs to the picture (found on the first screenshots: nine rows of
+    // settings and status above it left the picture 60 pixels)
+    ImGui::SetNextItemWidth(70 * gUi);
+    ImGui::InputInt("RF channel##extrf", &S.rf, 0, 0);
+    ImGui::SameLine();
+    if (ImGui::Button(S.havePlaying ? "Tune##exttune" : "Start and tune##exttune")) play(a);
+    if (S.havePlaying) { ImGui::SameLine(); if (ImGui::Button("Stop##extstop")) stopPlaying(a); }
     if (!st.channels.empty()) {
         ImGui::SameLine();
         ImGui::TextDisabled("%s", tr("engine's table:"));
@@ -170,10 +178,23 @@ void tab(App& a) {
             if (ImGui::IsItemHovered()) ImGui::SetTooltip("%s", st.channelLabels[i].c_str());
         }
     }
-    if (ImGui::Button(S.havePlaying ? "Tune##exttune" : "Start and tune##exttune")) play(a);
     if (!S.msg.empty()) { ImGui::SameLine(); ImGui::TextColored(ImVec4(0.95f, 0.8f, 0.35f, 1), "%s", S.msg.c_str()); }
-    ImGui::Separator();
-    if (S.havePlaying) drawStatus(a);
+    // the engine's own settings: open until a channel plays, folded away while one does
+    static int shownFor = -1;
+    if (shownFor != (int)S.havePlaying) { ImGui::SetNextItemOpen(!S.havePlaying); shownFor = (int)S.havePlaying; }
+    if (ImGui::CollapsingHeader("Engine##exteng")) {
+        ImGui::PushTextWrapPos(0);
+        ImGui::TextDisabled("%s", tr("A receiver in another program: OnAir starts it, tunes it, and plays its transport stream. The first engine is tvTuna (ATSC 1.0 and ATSC 3.0)."));
+        ImGui::PopTextWrapPos();
+        ImGui::SetNextItemWidth(std::min(600.f * gUi, ImGui::GetContentRegionAvail().x - 8));
+        if (ImGui::InputText("Engine command##extcmd", S.cmdBuf, sizeof S.cmdBuf)) saveState();
+        ImGui::SetNextItemWidth(160 * gUi);
+        if (ImGui::InputText("TS host##exthost", S.hostBuf, sizeof S.hostBuf)) saveState();
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(90 * gUi);
+        if (ImGui::InputInt("port##extport", &S.port, 0, 0)) saveState();
+    }
+    if (S.havePlaying) drawState(a, st);
     playerTab(a);
 }
 
@@ -224,6 +245,7 @@ const ModeUi kExtEngineUi = {
     .tabName = "External engine",
     .tabIcon = Ic::Tv,
     .tab = tab,
+    .panels = panels,
     .status = status,
     .summary = summary,
     .tick = tick,
