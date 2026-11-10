@@ -10,13 +10,40 @@ chain and ATSC 3.0 through the atsc3 receiver, both behind gr-rxtune's gain sear
 on decoder output (the equaliser's training error AND pictures arriving, or the share of FEC blocks
 that come out clean), and behind a site radio warden that shares one SDR between many programs.
 
-## Using it
+## Try it first with no radio
 
-1. Install the engine and tell it where its receivers are (`tvtuna init`), then run `tvtuna scan`
-   once so it knows which channels carry TV.
-2. In OnAir pick **External engine**, check the engine command (default `python -m tvtuna engine
-   --tcp 8555`), the TS host and port, give the RF channel number (or click one from the engine's
-   own table once the engine has started), press **Start and tune**.
+The engine can play a recorded transport stream in place of a receiver, so the mode, the pipes, the
+socket and the player can be checked on any computer:
+
+1. Get the engine: [github.com/Felbs/tvTuna](https://github.com/Felbs/tvTuna) (GPL-3.0-or-later),
+   then `pip install .` in the clone. It needs Python 3.9 or later and nothing else for this step.
+2. Take any MPEG-TS recording, or make a 20-second test pattern with the ffmpeg line in tvTuna's
+   README ("Try it without a radio").
+3. In OnAir pick **External engine**, open **Engine**, set the engine command to
+   `<full path to that python> -m tvtuna engine --tcp 8555 --replay <full path to the file.ts>`,
+   give any RF channel number, press **Start and tune**.
+
+The picture plays in a loop and the line above it reads "decoding". The measurement row shows the
+packet and continuity counts of the bytes sent; the servo line reads `replay (no radio)` and there
+is no MER, because nothing is being received. Checked on 2026-11-09 (Windows 11, tvTuna 65ce10e
+installed from a fresh clone): 1344 pictures shown, 0 late, 0 decode errors, 0 continuity errors
+across two passes of the pattern.
+
+## Using it on real air
+
+1. Set the engine up as tvTuna's README says ("Setting up for real air": an interpreter with
+   SoapySDR and GNU Radio, the Software TV Tuner, gr-rxtune, the atsc3 receiver if ATSC 3.0 is
+   wanted, then `tvtuna init ...`). `tvtuna doctor` checks every piece and must end with
+   `0 failure(s)`. Get a first picture with `tvtuna watch --rf N` before bringing OnAir in.
+   Tested hardware: one SDRplay RSPdx on Windows 11. The gain search turns the RSP's two gain
+   knobs; other radios are not written yet.
+2. In OnAir pick **External engine**, check the engine command, the TS host and port, give the RF
+   channel number (or click one from the engine's own table once the engine has started), press
+   **Start and tune**. The default command `python -m tvtuna engine --tcp 8555` only works when
+   the `python` OnAir finds first is the one tvTuna was installed in; otherwise give that
+   interpreter's full path. A channel the engine has not seen before is taken as ATSC 1.0 and gets
+   a full gain search (about three minutes before the first hold); an ATSC 3.0 channel must be
+   tuned once from the command line first (`tvtuna tune --rf N`).
 3. The picture appears in the mode's tab with the usual player controls (volume, subtitles, audio
    track, full screen, pop out, recording). The tab keeps one row of controls above it; the engine's
    command, host and port fold away under **Engine** while a channel plays. The main programme of the
