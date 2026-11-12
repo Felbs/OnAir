@@ -1,7 +1,8 @@
 // atsc3rx: decodes an ATSC 3.0 IQ recording to a transport stream and prints what it found (services, statistics). For checking recordings
 // and the receiver without the GUI.
-//   atsc3rx recording.cs8 --rate 10e6 [--format cs8|cu8|cs16|cf32] [--out out.ts] [--service id]   (cs16: 16-bit I/Q, as SDRplay radios record)
+//   atsc3rx recording.cs8 --rate 10e6 [--format cs8|cu8|cs16|cf32] [--out out.ts] [--service id]   (cs16, or ci16 as OnAir names its own recordings: 16-bit I/Q)
 #include "dect2/atsc3/atsc3_sync.h"
+#include "dect2/dsp/sample_convert.h"
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
@@ -24,8 +25,9 @@ int main(int argc, char** argv) {
         else if (a == "--service") service = atoi(val().c_str()); else if (a[0] != '-') path = a;
         else { printf("unknown option %s\n", a.c_str()); return 1; }
     }
-    if (path.empty()) { printf("usage: atsc3rx recording --rate 10e6 [--format cs8|cu8|cs16|cf32] [--out out.ts] [--service id]\n"); return 1; }
-    if (format != "cs8" && format != "cu8" && format != "cs16" && format != "cf32") { printf("unknown format %s (cs8, cu8, cs16 or cf32)\n", format.c_str()); return 1; }
+    if (path.empty()) { printf("usage: atsc3rx recording --rate 10e6 [--format cs8|cu8|cs16|ci16|cf32] [--out out.ts] [--service id]\n"); return 1; }
+    if (format == "ci16") format = "cs16";   // the same bytes under OnAir's own name
+    if (format != "cs8" && format != "cu8" && format != "cs16" && format != "cf32") { printf("unknown format %s (cs8, cu8, cs16, ci16 or cf32)\n", format.c_str()); return 1; }
     const size_t bytesPerSample = format == "cf32" ? 8 : format == "cs16" ? 4 : 2;
     std::ifstream f(path, std::ios::binary);
     if (!f) { printf("cannot open %s\n", path.c_str()); return 1; }
@@ -45,9 +47,9 @@ int main(int argc, char** argv) {
         f.read((char*)raw.data(), (std::streamsize)raw.size());
         size_t got = (size_t)f.gcount() / bytesPerSample;
         if (!got) break;
-        for (size_t i = 0; i < got; i++) {
+        if (format == "cs16") convertCs16((const int16_t*)raw.data(), got, x.data(), 1.f / 32768);
+        else for (size_t i = 0; i < got; i++) {
             if (format == "cf32") { float re, im; memcpy(&re, &raw[i * 8], 4); memcpy(&im, &raw[i * 8 + 4], 4); x[i] = cf32(re, im); }
-            else if (format == "cs16") { int16_t re, im; memcpy(&re, &raw[i * 4], 2); memcpy(&im, &raw[i * 4 + 2], 2); x[i] = cf32(re / 32767.f, im / 32767.f); }
             else if (format == "cu8") x[i] = cf32(((int)raw[2 * i] - 127.5f) / 127.5f, ((int)raw[2 * i + 1] - 127.5f) / 127.5f);
             else x[i] = cf32((int8_t)raw[2 * i] / 127.f, (int8_t)raw[2 * i + 1] / 127.f);
         }
