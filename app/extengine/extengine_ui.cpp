@@ -70,6 +70,9 @@ void loadState() {
 // ---- the player side (the same shape as Internet TV) ----
 void sink(const uint8_t* p, size_t n, App* a) {
     std::lock_guard<std::mutex> lk(S.pmu);
+    // nothing for the player after Stop (the engine closes in the background), nor once the screen is no longer drawn: the player
+    // may already belong to another screen
+    if (!S.havePlaying || glfwGetTime() - S.lastTick.load() > 0.5) return;
     for (size_t i = 0; i < n; i++) S.demux.feed(p + i * 188);
     a->engine.feedPlaybackSubtitles(p, n);
     const double t = glfwGetTime();
@@ -100,7 +103,8 @@ void stopPlaying(App& a) {
 
 void play(App& a) {
     if (S.rf <= 0) { S.msg = "Give the RF channel number the engine should tune."; return; }
-    { std::lock_guard<std::mutex> lk(S.pmu); S.demux.reset(); S.snap = TsSnapshot(); S.snapT = 0; S.selected = false; S.pmtT = 0; }
+    if (S.eng.closing()) { S.msg = "The engine is still closing its receiver. Try again in a moment."; return; }
+    { std::lock_guard<std::mutex> lk(S.pmu); S.demux.reset(); S.snap = TsSnapshot(); S.snapT = 0; S.selected = false; S.pmtT = 0; S.havePlaying = true; }
     a.engine.player().select(-1);
     a.engine.setPlayerExternal(true);
     a.engine.teletext().reset();
@@ -112,7 +116,6 @@ void play(App& a) {
         return false;
     };
     S.msg.clear();
-    S.havePlaying = true;
     saveState();
     if (!S.eng.running()) S.eng.start(S.cmdBuf, S.hostBuf, S.port, [ap](const uint8_t* p, size_t n) { sink(p, n, ap); }, alive);
     S.eng.tune(S.rf);
@@ -126,7 +129,8 @@ void drawState(App& a, const extengine::Status& st) {
     const bool good = st.state == "up" && (st.video || st.fecPct > 50);
     ImVec4 col = good ? ImVec4(0.45f, 0.85f, 0.5f, 1) : st.state == "error" ? ImVec4(0.95f, 0.45f, 0.4f, 1) : ImVec4(0.95f, 0.8f, 0.35f, 1);
     const char* label = st.state == "up" ? (good ? "decoding" : "tuned, waiting for pictures") : st.state == "tuning" ? "tuning (the engine searches the gain on decoder truth)"
-                      : st.state == "starting" ? "starting the engine" : st.state == "error" ? "cannot play" : st.state == "idle" ? "engine idle" : "stopped";
+                      : st.state == "starting" ? "starting the engine" : st.state == "error" ? "cannot play" : st.state == "idle" ? "engine idle"
+                      : st.state == "stopping" ? "the engine is closing its receiver" : "stopped";
     ImGui::SameLine();
     ImGui::TextColored(col, "%s", label);
     if (!st.message.empty()) { ImGui::SameLine(); ImGui::PushTextWrapPos(0); ImGui::TextUnformatted(st.message.c_str()); ImGui::PopTextWrapPos(); }
@@ -237,6 +241,7 @@ void tick(App& a) {
 
 void extengineShutdown() {
     S.eng.stop();
+    S.eng.wait();   // the program's end: the engine must have closed its radio before OnAir is gone
 }
 
 extern const ModeUi kExtEngineUi;

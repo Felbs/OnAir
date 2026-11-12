@@ -42,6 +42,14 @@ int main() {
     CHECK(s.fecPct < 0, "a null FEC reads unknown, got %.1f", s.fecPct);
     CHECK(s.radioOwner.empty(), "a null radio reads free, got '%s'", s.radioOwner.c_str());
 
+    CHECK(applyLine(R"({"ev": "status", "rf": 33, "up": true, "last": {"standard": "atsc3", "packets": null, "cc_errors": null, "sink_bytes": null}})", s), "status with null counters");
+    CHECK(s.packets == -1 && s.ccErrors == -1 && s.sinkBytes == -1, "null counters read unknown, got %lld %lld %lld", s.packets, s.ccErrors, s.sinkBytes);
+
+    // a new channel shows nothing of the last one: after ATSC 3.0 (frames, FEC) an ATSC 1.0 channel comes up
+    CHECK(applyLine(R"({"ev": "status", "rf": 33, "up": true, "last": {"standard": "atsc3", "frames": 500, "fec_pct": 100.0, "sink_bytes": 5}})", s), "status atsc3 again");
+    CHECK(applyLine(R"({"ev": "up", "rf": 34, "standard": "atsc1", "tcp": 8555})", s), "up on another channel");
+    CHECK(s.frames == -1 && s.fecPct < 0 && s.sinkBytes == -1 && s.merDb < 0 && !s.video, "up clears the decoder truth: frames %lld fec %.1f", s.frames, s.fecPct);
+
     CHECK(applyLine(R"({"ev": "error", "rf": 36, "msg": "chain did not start"})", s), "error");
     CHECK(s.state == "error" && !s.up && s.message == "chain did not start", "error folded: %s / %s", s.state.c_str(), s.message.c_str());
     CHECK(applyLine(R"({"ev": "released", "rf": 36})", s), "released");

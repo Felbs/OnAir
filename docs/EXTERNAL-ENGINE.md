@@ -53,8 +53,12 @@ across two passes of the pattern.
    pictures per second (ATSC 1.0) or frames and interval FEC (ATSC 3.0), packet and
    continuity-error counts, and who holds the radio.
 
-Leaving the screen stops the engine; so does closing OnAir. The engine is always asked to stop
-(it must close its radio itself) and is only killed if it has not exited after 90 s.
+Leaving the screen stops the engine; so does Stop, and closing OnAir. The engine is always asked
+to stop (it must close its radio itself) and gets 90 s for that; the window stays usable meanwhile.
+After that, or when the engine exits by itself, whatever it started and left behind is asked to
+end (SIGTERM, 5 s) and then killed, so that no receiver keeps the radio. On Linux and macOS the
+engine runs in a process group of its own for this; on Windows only the engine's own process is
+ended.
 
 ## The protocol
 
