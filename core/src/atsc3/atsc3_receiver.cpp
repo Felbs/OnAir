@@ -174,6 +174,12 @@ bool Atsc3Receiver::commitFrame(const FrameResult& fr, const Bootstrap& bs) {
     for (auto& p : fr.plps) todo.push_back(p.cti || p.straddle ? &ctiOut[ci++] : &p);
     for (const PlpResult* pp : todo) {
         const PlpResult& p = *pp;
+        {
+            std::lock_guard<std::mutex> lk(mu_);
+            auto& t = st_.plpTotals[p.id];
+            t.blocks += (long)p.ok.size();
+            for (bool b : p.ok) t.blocksOk += b ? 1 : 0;
+        }
         // blocks that failed leave a gap: the packet reassembly restarts after it
         std::vector<std::vector<uint8_t>> run;
         size_t j = 0;
@@ -199,7 +205,7 @@ void Atsc3Receiver::pushBbPackets(int plpId, const std::vector<std::vector<uint8
         for (auto& pk : packets) {
             st_.bbPackets++;
             BbHeader h;
-            if (!parseBbHeader(pk.data(), (int)pk.size(), h)) { st_.bbBad++; r.reset(); continue; }
+            if (!parseBbHeader(pk.data(), (int)pk.size(), h)) { st_.bbBad++; st_.plpTotals[plpId].headerBad++; r.reset(); continue; }
             r.push(pk.data() + h.headerBytes, (int)pk.size() - h.headerBytes, h.pointer, out);
         }
     }

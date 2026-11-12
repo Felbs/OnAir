@@ -21,6 +21,9 @@ struct ReceiverStats {
     long bbPackets = 0, bbBad = 0;
     long alpPackets = 0, alpIp = 0, alpSignaling = 0, alpTs = 0, alpCompressedIp = 0, alpOther = 0;
     long udp = 0, llsTables = 0, routeObjects = 0, objectsDelivered = 0;
+    // per PLP over the whole run: FEC blocks handed to the link layer, how many of them decoded, and how many baseband headers did not parse
+    struct PlpTotals { long blocks = 0, blocksOk = 0, headerBad = 0; };
+    std::map<int, PlpTotals> plpTotals;
 };
 
 struct FrameInfo {

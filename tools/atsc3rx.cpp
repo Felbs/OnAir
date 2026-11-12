@@ -1,6 +1,6 @@
 // atsc3rx: decodes an ATSC 3.0 IQ recording to a transport stream and prints what it found (services, statistics). For checking recordings
 // and the receiver without the GUI.
-//   atsc3rx recording.cs8 --rate 10e6 [--format cs8|cu8|cf32] [--out out.ts] [--service id]
+//   atsc3rx recording.cs8 --rate 10e6 [--format cs8|cu8|cs16|cf32] [--out out.ts] [--service id]   (cs16: 16-bit I/Q, as SDRplay radios record)
 #include "dect2/atsc3/atsc3_sync.h"
 #include <chrono>
 #include <cstdio>
@@ -24,7 +24,9 @@ int main(int argc, char** argv) {
         else if (a == "--service") service = atoi(val().c_str()); else if (a[0] != '-') path = a;
         else { printf("unknown option %s\n", a.c_str()); return 1; }
     }
-    if (path.empty()) { printf("usage: atsc3rx recording --rate 10e6 [--format cs8|cu8|cf32] [--out out.ts] [--service id]\n"); return 1; }
+    if (path.empty()) { printf("usage: atsc3rx recording --rate 10e6 [--format cs8|cu8|cs16|cf32] [--out out.ts] [--service id]\n"); return 1; }
+    if (format != "cs8" && format != "cu8" && format != "cs16" && format != "cf32") { printf("unknown format %s (cs8, cu8, cs16 or cf32)\n", format.c_str()); return 1; }
+    const size_t bytesPerSample = format == "cf32" ? 8 : format == "cs16" ? 4 : 2;
     std::ifstream f(path, std::ios::binary);
     if (!f) { printf("cannot open %s\n", path.c_str()); return 1; }
     Atsc3Receiver rx;
@@ -34,17 +36,18 @@ int main(int argc, char** argv) {
     Atsc3Sync sync(rate, &rx);
     sync.setThreads(getenv("ATSC3_THREADS") ? atoi(getenv("ATSC3_THREADS")) : 4);
     const size_t block = 1 << 18;
-    std::vector<unsigned char> raw(block * (format == "cf32" ? 8 : 2));
+    std::vector<unsigned char> raw(block * bytesPerSample);
     std::vector<cf32> x(block);
     long total = 0;
     auto t0 = std::chrono::steady_clock::now();
     bool pickedService = service >= 0;
     while (f) {
         f.read((char*)raw.data(), (std::streamsize)raw.size());
-        size_t got = (size_t)f.gcount() / (format == "cf32" ? 8 : 2);
+        size_t got = (size_t)f.gcount() / bytesPerSample;
         if (!got) break;
         for (size_t i = 0; i < got; i++) {
             if (format == "cf32") { float re, im; memcpy(&re, &raw[i * 8], 4); memcpy(&im, &raw[i * 8 + 4], 4); x[i] = cf32(re, im); }
+            else if (format == "cs16") { int16_t re, im; memcpy(&re, &raw[i * 4], 2); memcpy(&im, &raw[i * 4 + 2], 2); x[i] = cf32(re / 32767.f, im / 32767.f); }
             else if (format == "cu8") x[i] = cf32(((int)raw[2 * i] - 127.5f) / 127.5f, ((int)raw[2 * i + 1] - 127.5f) / 127.5f);
             else x[i] = cf32((int8_t)raw[2 * i] / 127.f, (int8_t)raw[2 * i + 1] / 127.f);
         }
@@ -70,6 +73,8 @@ int main(int argc, char** argv) {
         for (auto& p : fi.plps) printf("  PLP %d: %d bits/cell, rate %d/15, %d-bit LDPC, blocks %d ok %d\n", p.id, p.bitsPerCell, p.rate15, p.nInner, p.blocks, p.blocksOk);
     }
     printf("physical layer: %ld baseband packets (%ld bad), %ld frames failed\n", rs.bbPackets, rs.bbBad, rs.framesFailed);
+    for (auto& [id, t] : rs.plpTotals)
+        printf("  PLP %d over the run: FEC blocks %ld, decoded %ld, failed %ld, baseband headers that did not parse %ld\n", id, t.blocks, t.blocksOk, t.blocks - t.blocksOk, t.headerBad);
     printf("link layer: %ld ALP packets (%ld IP, %ld signaling, %ld compressed IP, %ld TS), %ld UDP datagrams, %ld service list tables, %ld ROUTE objects\n",
            rs.alpPackets, rs.alpIp, rs.alpSignaling, rs.alpCompressedIp, rs.alpTs, rs.udp, rs.llsTables, rs.routeObjects);
     for (auto& s : rx.services())
