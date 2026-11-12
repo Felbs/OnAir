@@ -69,10 +69,12 @@ struct OutputManager::Impl {
             st.fileBytes += n;
             st.filePackets += n / 188;
         };
-        wr(fileHold.data(), fileHold.size());
-        fileHold.clear();
+        // fileQ holds the older packets (already scheduled), fileHold the newest: write them in that order, or the tail of the
+        // recording lands in the middle of the file whenever the paced queue is behind at close.
         for (const Dgram& d : fileQ) wr(d.data.data(), d.data.size());
         fileQ.clear();
+        wr(fileHold.data(), fileHold.size());
+        fileHold.clear();
         fflush(file);
     }
     void startSender() {
