@@ -552,6 +552,9 @@ struct Atsc3Remux::Impl {
         // the tables of a new output get a new version, so that a player that keeps the old ones takes the new streams
         AVDictionary* opts = nullptr;
         av_dict_set_int(&opts, "tables_version", run & 31, 0);
+        // each service its own PIDs (0x100, 0x120, ... and round again after 64): a player that keeps reading across a service change
+        // must not get the new service's sound on the PID the old picture had, which an older FFmpeg (6.1) can go on reading as that picture
+        av_dict_set_int(&opts, "mpegts_start_pid", 0x100 + 0x20 * (runGen & 63), 0);
         const int wh = avformat_write_header(oc, &opts);
         av_dict_free(&opts);
         if (wh < 0) {

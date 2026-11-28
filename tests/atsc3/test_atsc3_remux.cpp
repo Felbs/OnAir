@@ -505,7 +505,21 @@ int main(int argc, char** argv) {
         int v1, a1, v2, a2;
         int64_t f1, l1, f2, l2;
         streamsAndLastPts(out.data(), first, v1, a1, f1, l1);
-        const size_t cut = first - first % 188;
+        // the second part starts at the first PAT with another version than the first part's last: the first output's trailer, written
+        // when the service changed, may still flush a few of its packets after `first`
+        auto patVersion = [&](size_t at) -> int {   // the version of the PAT starting in the TS packet at `at`, or -1
+            const uint8_t* p = out.data() + at;
+            if (p[0] != 0x47 || !(p[1] & 0x40) || (((p[1] & 0x1f) << 8) | p[2]) != 0) return -1;
+            size_t o = 4;
+            if (p[3] & 0x20) o += 1 + p[4];
+            if (!(p[3] & 0x10) || o + 7 >= 188) return -1;
+            o += 1 + p[o];   // pointer field
+            return o + 5 < 188 && p[o] == 0x00 ? (p[o + 5] >> 1) & 31 : -1;
+        };
+        int lastV = -1;
+        for (size_t at = 0; at + 188 <= first; at += 188) { const int v = patVersion(at); if (v >= 0) lastV = v; }
+        size_t cut = first - first % 188;
+        for (size_t at = cut; at + 188 <= out.size(); at += 188) { const int v = patVersion(at); if (v >= 0 && v != lastV) { cut = at; break; } }
         streamsAndLastPts(out.data() + cut, out.size() - cut, v2, a2, f2, l2);
         printf("  another service: %d streams before (%d video, %d audio, audio %lld..%lld ms), %d after (%d video, %d audio, audio %lld..%lld ms)\n", before, v1, a1,
                (long long)f1, (long long)l1, after, v2, a2, (long long)f2, (long long)l2);
